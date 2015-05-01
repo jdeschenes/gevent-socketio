@@ -1,3 +1,5 @@
+import logging
+log = logging.getLogger(__name__)
 import sys
 import re
 import gevent
@@ -30,6 +32,7 @@ class SocketIOHandler(WSGIHandler):
         'xhr-multipart': transports.XHRMultipartTransport,
         'xhr-polling': transports.XHRPollingTransport,
         'jsonp-polling': transports.JSONPolling,
+        'polling': transports.XHRPollingTransport
     }
 
     def __init__(self, config, *args, **kwargs):
@@ -52,16 +55,28 @@ class SocketIOHandler(WSGIHandler):
                 raise ValueError("transports should be elements of: %s" %
                     (self.handler_types.keys()))
 
-    def _do_handshake(self, tokens):
-        if tokens["resource"] != self.server.resource:
-            self.log_error("socket.io URL mismatch")
-        else:
-            socket = self.server.get_socket()
-            data = "%s:%s:%s:%s" % (socket.sessid,
-                                    self.config['heartbeat_timeout'] or '',
-                                    self.config['close_timeout'] or '',
-                                    ",".join(self.transports))
-            self.write_smart(data)
+    def _do_handshake(self):
+        socket = self.server.get_socket()
+        dd = {'sid': str(socket.sessid),
+              'upgrades': ['websocket'],
+              'pingInterval': self.config['heartbeat_timeout']*1000,
+              'pingTimeout': self.config['close_timeout']*1000
+             }
+        packet_to_send = '0{{"sid":"{0}","upgrades":["websocket"],"pingInterval":{1},"pingTimeout":{2}}}'.format(
+            socket.sessid,
+            self.config['heartbeat_timeout']*1000,
+            self.config['close_timeout']*1000)
+        length_of_packet = len(packet_to_send)
+        first_unit = length_of_packet % 10
+        second_unit = ((length_of_packet - first_unit)/10) % 10
+
+        data = '\x00{0}{1}\xff0{{"sid":"{2}","upgrades":["websocket"],"pingInterval":{3},"pingTimeout":{4}}}'.format(
+            chr(second_unit),
+            chr(first_unit),
+            socket.sessid,
+            self.config['heartbeat_timeout']*1000,
+            self.config['close_timeout']*1000)
+        self.write_smart(data)
 
     def write_jsonp_result(self, data, wrapper="0"):
         self.start_response("200 OK", [
@@ -70,12 +85,17 @@ class SocketIOHandler(WSGIHandler):
         self.result = ['io.j[%s]("%s");' % (wrapper, data)]
 
     def write_plain_result(self, data):
+        socket = self.server.get_socket()
+
         self.start_response("200 OK", [
             ("Access-Control-Allow-Origin", self.environ.get('HTTP_ORIGIN', '*')),
-            ("Access-Control-Allow-Credentials", "true"),
-            ("Access-Control-Allow-Methods", "POST, GET, OPTIONS"),
-            ("Access-Control-Max-Age", 3600),
-            ("Content-Type", "text/plain"),
+#            ("Access-Control-Allow-Credentials", "true"),
+#            ("Access-Control-Allow-Methods", "POST, GET, OPTIONS"),
+#            ("Access-Control-Max-Age", 3600),
+            ("Content-Type", "application/octet-stream"),
+            ("Connection", "keep-alive"),
+            ("Set-Cookie", "io={0}".format(socket.sessid))
+#            ("Content-Type", "text/plain"),
         ])
         self.result = [data]
 
@@ -98,6 +118,7 @@ class SocketIOHandler(WSGIHandler):
         """
         path = self.environ.get('PATH_INFO')
 
+
         # Kick non-socket.io requests to our superclass
         if not path.lstrip('/').startswith(self.server.resource + '/'):
             return super(SocketIOHandler, self).handle_one_response()
@@ -116,10 +137,16 @@ class SocketIOHandler(WSGIHandler):
         handshake_tokens = self.RE_HANDSHAKE_URL.match(path)
         disconnect_tokens = self.RE_DISCONNECT_URL.match(path)
 
-        if handshake_tokens:
+        args = urlparse.parse_qs(self.environ.get("QUERY_STRING"))
+
+        if 'sid' not in args:
             # Deal with first handshake here, create the Socket and push
             # the config up.
-            return self._do_handshake(handshake_tokens.groupdict())
+            return self._do_handshake()
+        else:
+            session_id = args['sid'][0]
+        if True:
+            pass
         elif disconnect_tokens:
             # it's a disconnect request via XHR
             tokens = disconnect_tokens.groupdict()
@@ -128,12 +155,13 @@ class SocketIOHandler(WSGIHandler):
             # and continue...
         else:
             # This is no socket.io request. Let the WSGI app handle it.
-            return super(SocketIOHandler, self).handle_one_response()
-
+            pass
         # Setup socket
-        sessid = tokens["sessid"]
+        sessid = session_id
         socket = self.server.get_socket(sessid)
         if not socket:
+            #TODO: BAD
+            return self._do_handshake()
             self.handle_bad_request()
             return []  # Do not say the session is not found, just bad request
                        # so they don't start brute forcing to find open sessions
@@ -145,9 +173,9 @@ class SocketIOHandler(WSGIHandler):
             socket.disconnect()
             self.handle_disconnect_request()
             return []
-
+        transport_id = args["transport"][0]
         # Setup transport
-        transport = self.handler_types.get(tokens["transport_id"])
+        transport = self.handler_types.get(transport_id)
 
         # In case this is WebSocket request, switch to the WebSocketHandler
         # FIXME: fix this ugly class change
@@ -190,7 +218,7 @@ class SocketIOHandler(WSGIHandler):
                 self.handle_error(*sys.exc_info())
 
         # we need to keep the connection open if we are an open socket
-        if tokens['transport_id'] in ['flashsocket', 'websocket']:
+        if transport_id in ['flashsocket', 'websocket']:
             # wait here for all jobs to finished, when they are done
             gevent.joinall(socket.jobs)
 

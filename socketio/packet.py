@@ -1,15 +1,13 @@
 from socketio.defaultjson import default_json_dumps, default_json_loads
 
 MSG_TYPES = {
-    'disconnect': 0,
-    'connect': 1,
-    'heartbeat': 2,
-    'message': 3,
-    'json': 4,
-    'event': 5,
-    'ack': 6,
-    'error': 7,
-    'noop': 8,
+    'open': 0,
+    'close': 1,
+    'ping': 2,
+    'pong': 3,
+    'message': 4,
+    'upgrade': 5,
+    'noop': 6,
     }
 
 MSG_VALUES = dict((v, k) for k, v in MSG_TYPES.iteritems())
@@ -38,66 +36,32 @@ def encode(data, json_dumps=default_json_dumps):
     """
     payload = ''
     msg = str(MSG_TYPES[data['type']])
-
     if msg in ['0', '1']:
         # '1::' [path] [query]
         msg += '::' + data['endpoint']
         if 'qs' in data and data['qs'] != '':
             msg += ':' + data['qs']
 
-    elif msg == '2':
-        # heartbeat
-        msg += '::'
+    elif msg in ['2', '3']:
+        # ping
+        pass
+        msg += data['data']
 
-    elif msg in ['3', '4', '5']:
+    elif msg in ['4']:
+        payload = json_dumps(data['data'])
         # '3:' [id ('+')] ':' [endpoint] ':' [data]
         # '4:' [id ('+')] ':' [endpoint] ':' [json]
         # '5:' [id ('+')] ':' [endpoint] ':' [json encoded event]
         # The message id is an incremental integer, required for ACKs.
         # If the message id is followed by a +, the ACK is not handled by
         # socket.io, but by the user instead.
-        if msg == '3':
-            payload = data['data']
-        if msg == '4':
-            payload = json_dumps(data['data'])
-        if msg == '5':
-            d = {}
-            d['name'] = data['name']
-            if 'args' in data and data['args'] != []:
-                d['args'] = data['args']
-            payload = json_dumps(d)
-        if 'id' in data:
-            msg += ':' + str(data['id'])
-            if data['ack'] == 'data':
-                msg += '+'
-            msg += ':'
-        else:
-            msg += '::'
-        if 'endpoint' not in data:
-            data['endpoint'] = ''
-        if payload != '':
-            msg += data['endpoint'] + ':' + payload
-        else:
-            msg += data['endpoint']
-
-    elif msg == '6':
-        # '6:::' [id] '+' [data]
-        msg += '::' + data.get('endpoint', '') + ':' + str(data['ackId'])
-        if 'args' in data and data['args'] != []:
-            msg += '+' + json_dumps(data['args'])
-
-    elif msg == '7':
-        # '7::' [endpoint] ':' [reason] '+' [advice]
-        msg += ':::'
-        if 'reason' in data and data['reason'] != '':
-            msg += str(ERROR_REASONS[data['reason']])
-        if 'advice' in data and data['advice'] != '':
-            msg += '+' + str(ERROR_ADVICES[data['advice']])
-        msg += data['endpoint']
-
+        pass
+        msg += payload
+    elif msg == '5':
+        pass
     # NoOp, used to close a poll after the polling duration time
-    elif msg == '8':
-        msg += '::'
+    elif msg == '6':
+        pass
 
     return msg
 
@@ -107,21 +71,12 @@ def decode(rawstr, json_loads=default_json_loads):
     Decode a rawstr packet arriving from the socket into a dict.
     """
     decoded_msg = {}
-    split_data = rawstr.split(":", 3)
-    msg_type = split_data[0]
-    msg_id = split_data[1]
-    endpoint = split_data[2]
+
+    msg_type = rawstr[0]
+    msg_message = rawstr[1:]
+
 
     data = ''
-
-    if msg_id != '':
-        if "+" in msg_id:
-            msg_id = msg_id.split('+')[0]
-            decoded_msg['id'] = int(msg_id)
-            decoded_msg['ack'] = 'data'
-        else:
-            decoded_msg['id'] = int(msg_id)
-            decoded_msg['ack'] = True
 
     # common to every message
     msg_type_id = int(msg_type)
@@ -130,60 +85,20 @@ def decode(rawstr, json_loads=default_json_loads):
     else:
         raise Exception("Unknown message type: %s" % msg_type)
 
-    decoded_msg['endpoint'] = endpoint
-
-    if len(split_data) > 3:
-        data = split_data[3]
-
-    if msg_type == "0":  # disconnect
+    if msg_type == "0":  # open
         pass
 
-    elif msg_type == "1":  # connect
+    elif msg_type == "1":  # close
         decoded_msg['qs'] = data
 
-    elif msg_type == "2":  # heartbeat
-        pass
-
-    elif msg_type == "3":  # message
-        decoded_msg['data'] = data
-
-    elif msg_type == "4":  # json msg
+    elif msg_type in ["2", "3"]:  # ping or pong
+        decoded_msg['data'] = msg_message
+    elif msg_type == "4":  # message
         decoded_msg['data'] = json_loads(data)
 
-    elif msg_type == "5":  # event
-        try:
-            data = json_loads(data)
-        except ValueError, e:
-            print("Invalid JSON event message", data)
-            decoded_msg['args'] = []
-        else:
-            decoded_msg['name'] = data.pop('name')
-            if 'args' in data:
-                decoded_msg['args'] = data['args']
-            else:
-                decoded_msg['args'] = []
-
-    elif msg_type == "6":  # ack
-        if '+' in data:
-            ackId, data = data.split('+')
-            decoded_msg['ackId'] = int(ackId)
-            decoded_msg['args'] = json_loads(data)
-        else:
-            decoded_msg['ackId'] = int(data)
-            decoded_msg['args'] = []
-
-    elif msg_type == "7":  # error
-        if '+' in data:
-            reason, advice = data.split('+')
-            decoded_msg['reason'] = REASONS_VALUES[int(reason)]
-            decoded_msg['advice'] = ADVICES_VALUES[int(advice)]
-        else:
-            decoded_msg['advice'] = ''
-            if data != '':
-                decoded_msg['reason'] = REASONS_VALUES[int(data)]
-            else:
-                decoded_msg['reason'] = ''
-    elif msg_type == "8":  # noop
+    elif msg_type == "5":  # upgrade
+        pass
+    elif msg_type == "6":  # noop
         pass
 
     return decoded_msg

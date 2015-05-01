@@ -1,23 +1,46 @@
+<!doctype html>
 <html>
   <head>
-    <title>Chatter!</title>
-    <script src="/static/jquery.js" type="text/javascript"></script>
-    <script src="/static/socket.io.js" type="text/javascript"></script>
-    <script src="/static/handlebars.js" type="text/javascript"></script>
-    <script src="/static/underscore.js" type="text/javascript"></script>
-    <script src="/static/backbone.js" type="text/javascript"></script>
-    <script src="/static/chatter.js" type="text/javascript"></script>
-    <link rel="stylesheet" type="text/css" href="/static/styles.css" />
+      <script src="https://cdn.socket.io/socket.io-1.2.0.js"></script>
+      <script src="http://code.jquery.com/jquery-1.11.1.js"></script>
+      <script>
+        var socket = io();
+        var i=0;
+        $(document).ready(function() {
+            $('form').submit(function(e){
+              i += 1;
+              if (i % 3 == 0) {
+                  chat_message = 'chatmessage';
+              } else {
+                  chat_message = 'chat message';
+              }
+              console.log(chat_message);
+              e.preventDefault();
+              socket.emit(chat_message, $('#m').val());
+              $('#m').val('');
+              return false;
+            });
+            socket.on('chat message', function(msg){
+              $('#messages').append($('<li>').text(msg));
+            });
+        });
+      </script>
+    <title>Socket.IO chat</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font: 13px Helvetica, Arial; }
+      form { background: #000; padding: 3px; position: fixed; bottom: 0; width: 100%; }
+      form input { border: 0; padding: 10px; width: 90%; margin-right: .5%; }
+      form button { width: 9%; background: rgb(130, 224, 255); border: none; padding: 10px; }
+      #messages { list-style-type: none; margin: 0; padding: 0; }
+      #messages li { padding: 5px 10px; }
+      #messages li:nth-child(odd) { background: #eee; }
+    </style>
   </head>
   <body>
-  <div id="container">
-    <h1>Chat Log</h1>
-    <div id="chatlog"></div><br />
-    <form id="chat_form">
-      <input type="text" id="chatbox"></input>
-      <button type="submit" id="submit">Send</button>
+    <ul id="messages"></ul>
+    <form id="FFF" action="">
+      <input id="m" autocomplete="off" /><button>Send</button>
     </form>
-    <button id='join'>join</button>
-  </div>
   </body>
 </html>

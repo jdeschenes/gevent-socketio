@@ -126,6 +126,7 @@ class XHRPollingTransport(BaseTransport):
 
         Inspired by socket.io/lib/transports/http.js
         """
+        raise ValueError(payload)
         payload = payload.decode('utf-8')
         if payload[0] == u"\ufffd":
             ret = []
@@ -146,7 +147,7 @@ class XHRPollingTransport(BaseTransport):
             self.start_response("200 OK", [
                 ("Connection", "close"),
             ])
-            self.write("1::")  # 'connect' packet
+            self.write("3probe")  # 'connect' packet
             return
         elif request_method in ("GET", "POST", "OPTIONS"):
             return getattr(self, request_method.lower())(socket)
@@ -239,12 +240,11 @@ class XHRMultipartTransport(XHRPollingTransport):
 class WebsocketTransport(BaseTransport):
     def do_exchange(self, socket, request_method):
         websocket = self.handler.environ['wsgi.websocket']
-        websocket.send("1::")  # 'connect' packet
+        websocket.send("3probe")  # 'connect' packet
 
         def send_into_ws():
             while True:
                 message = socket.get_client_msg()
-
                 if message is None:
                     break
                 try:

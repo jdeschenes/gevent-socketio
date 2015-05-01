@@ -151,6 +151,23 @@ class BaseNamespace(object):
         """
         packet_type = packet['type']
 
+        if packet_type == 'open':
+            pass
+        elif packet_type == 'close':
+            pass
+        elif packet_type == 'ping':
+            self.socket.send_packet(packet)
+        elif packet_type == 'pong':
+            self.socket.send_packet(packet)
+        elif packet_type == 'message':
+            pass
+        elif packet_type == 'upgrade':
+            pass
+        elif packet_type == 'noop':
+            pass
+        else:
+            print 'Unprocessed packet'
+
         if packet_type == 'event':
             return self.process_event(packet)
         elif packet_type == 'message':

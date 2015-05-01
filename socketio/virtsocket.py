@@ -357,7 +357,6 @@ class Socket(object):
 
         while True:
             rawdata = self.get_server_msg()
-
             if not rawdata:
                 continue  # or close the connection ?
             try:
@@ -373,45 +372,15 @@ class Socket(object):
                 # any incoming raw data arrives.
                 continue
 
-            if pkt['type'] == 'disconnect' and pkt['endpoint'] == '':
+            if pkt['type'] == 'close':
                 # On global namespace, we kill everything.
                 self.kill(detach=True)
                 continue
 
-            endpoint = pkt['endpoint']
-
-            if endpoint not in self.namespaces:
-                self.error("no_such_namespace",
-                    "The endpoint you tried to connect to "
-                    "doesn't exist: %s" % endpoint, endpoint=endpoint)
-                continue
-            elif endpoint in self.active_ns:
-                pkt_ns = self.active_ns[endpoint]
-            else:
-                new_ns_class = self.namespaces[endpoint]
-                pkt_ns = new_ns_class(self.environ, endpoint,
-                                        request=self.request)
-                # This calls initialize() on all the classes and mixins, etc..
-                # in the order of the MRO
-                for cls in type(pkt_ns).__mro__:
-                    if hasattr(cls, 'initialize'):
-                        cls.initialize(pkt_ns)  # use this instead of __init__,
-                                                # for less confusion
-
-                self.active_ns[endpoint] = pkt_ns
-
-            retval = pkt_ns.process_packet(pkt)
-
-            # Has the client requested an 'ack' with the reply parameters ?
-            if pkt.get('ack') == "data" and pkt.get('id'):
-                if type(retval) is tuple:
-                    args = list(retval)
-                else:
-                    args = [retval]
-                returning_ack = dict(type='ack', ackId=pkt['id'],
-                                     args=args,
-                                     endpoint=pkt.get('endpoint', ''))
-                self.send_packet(returning_ack)
+            if pkt['type'] == 'ping':
+                retval = pkt
+                retval['type'] = 'pong'
+                self.send_packet(retval)
 
             # Now, are we still connected ?
             if not self.connected:
@@ -458,7 +427,7 @@ class Socket(object):
             #       We would do that by calling timeout.set() for a "sending"
             #       timeout.  If we're sending 100 messages a second, there is
             #       no need to push some heartbeats in there also.
-            self.put_client_msg("2::")
+            self.put_client_msg("2")
 
     def _heartbeat_timeout(self):
         timeout = float(self.config['heartbeat_timeout'])
